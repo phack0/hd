@@ -1,0 +1,140 @@
+%%cu
+#include <bits/stdc++.h>
+#include <algorithm>
+#include <cuda.h>
+#include<omp.h>
+using namespace std;
+
+
+
+int knapSack(int W, int wt[], int val[], int n)
+{
+    // Base Case
+    if (n == 0 || W == 0)
+        return 0;
+ 
+    // If weight of the nth item is more than
+    // Knapsack capacity W, then this item cannot
+    // be included in the optimal solution
+    if (wt[n - 1] > W)
+        return knapSack(W, wt, val, n - 1);
+ 
+    // Return the maximum of two cases:
+    // (1) nth item included
+    // (2) not included
+    else
+        return max(
+            val[n - 1]
+                + knapSack(W - wt[n - 1], wt, val, n - 1),
+            knapSack(W, wt, val, n - 1));
+}
+
+
+// Kernel function to solve the knapsack problem in parallel
+_global_ void knapsack(int n, int capacity, int* weights, int* values, int* solution, int* start) 
+{
+    // Calculate the thread index
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Check if the thread index is within the valid range
+    if (tid >= capacity + 1) 
+    {
+        return;
+    }
+    
+    // Iterate over the items, starting from the assigned start index for this thread
+   
+    for (int i = start[tid]; i < n; i++) 
+    {
+        // Check if the current item can be added to the knapsack
+        
+        if (weights[i] <= tid)
+        {
+            // Calculate the temporary value if the current item is added
+            
+            int temp = solution[tid - weights[i]] + values[i];
+            
+            // Update the solution if the temporary value is higher
+            
+            if (temp > solution[tid]) 
+            {
+                solution[tid] = temp;
+                start[tid] = i;
+            }
+        }
+    }
+}
+
+int main() 
+{
+    int n = 1000;
+    int capacity = 17;
+    int weights[n];
+    int values[n];
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    int min = 1;  // Minimum value
+    int max = 100;  // Maximum value
+    std::uniform_int_distribution<> dis(min, max);
+    for (int i = 0; i < n; ++i) 
+    {
+        weights[i] = dis(gen);
+    }
+    std::uniform_int_distribution<> dis1(min, max);
+    for (int i = 0; i < n; ++i) 
+    {
+        values[i] = dis1(gen);
+    }
+
+    // Allocate memory on the GPU for variables
+    int* gpu_capacity, *gpu_weights, *gpu_values, *gpu_solution, *gpu_start;
+    
+    cudaMalloc(&gpu_capacity, sizeof(int));
+    
+    cudaMalloc(&gpu_weights, n * sizeof(int));
+    
+    cudaMalloc(&gpu_values, n * sizeof(int));
+    
+    cudaMalloc(&gpu_solution, (capacity + 1) * sizeof(int));
+    
+    cudaMalloc(&gpu_start, (capacity + 1) * sizeof(int));
+
+    // Copy input data from host to device
+    
+    cudaMemcpy(gpu_capacity, &capacity, sizeof(int), cudaMemcpyHostToDevice);
+    
+    cudaMemcpy(gpu_weights, weights, n * sizeof(int), cudaMemcpyHostToDevice);
+    
+    cudaMemcpy(gpu_values, values, n * sizeof(int), cudaMemcpyHostToDevice);
+
+    int threadsPerBlock = 256;
+    
+    int blocksPerGrid = (capacity + threadsPerBlock - 1) / threadsPerBlock;
+    auto start = std::chrono::high_resolution_clock::now();
+    // Launch the kernel function on the GPU
+    knapsack <<<blocksPerGrid, threadsPerBlock>>>(n, capacity, gpu_weights, gpu_values, gpu_solution, gpu_start);
+    int* solution = new int[capacity + 1];
+    cudaMemcpy(solution, gpu_solution, (capacity + 1) * sizeof(int), cudaMemcpyDeviceToHost);
+    cout << "Maximum Value: " << solution[capacity] << endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+    // Print the execution time
+    std::cout << "Execution Time for parallel knapsack: " << duration << " microseconds" << std::endl;
+ 
+    start = std::chrono::high_resolution_clock::now();
+    cout <<"maximum value " <<knapSack(capacity, weights, values, n)<<endl;
+    end = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+    // Print the execution time
+    std::cout << "Execution Time for serial knapsack : " << duration << " microseconds" << std::endl;
+
+    
+    cudaFree(gpu_capacity);
+    cudaFree(gpu_weights);
+    cudaFree(gpu_values);
+    cudaFree(gpu_solution);
+    cudaFree(gpu_start);
+    delete[] solution;
+    return 0;
+}
