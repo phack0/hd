@@ -1,4 +1,4 @@
-//Submitted by Navneet Das 3433 COMP A 
+
 
 #include <bits/stdc++.h>
 #include <omp.h>
